@@ -1,8 +1,8 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMapsLibrary } from '@vis.gl/react-google-maps'
 import type { GeneratedRoute, LatLng, RouteRequest } from '../types/route'
-import { angularDiffDeg, bearingDegBetween, destinationPoint } from '../lib/geo'
-import { countTrafficSignalsAndCrossings } from '../lib/crossings'
+import { angularDiffDeg, bearingDegBetween, destinationPoint, haversineDistanceMeters } from '../lib/geo'
+import { countNodesNearPath, fetchNearbyTrafficNodes, type OverpassNode } from '../lib/crossings'
 
 const CANDIDATE_ROTATIONS_DEG = [0, 60, 120, 180, 240, 300]
 // Real streets zigzag relative to a straight loop, so a circle sized exactly
@@ -13,6 +13,16 @@ const LOOP_RADIUS_CALIBRATION = 0.72
 const BATCH_ROTATION_STEP_DEG = 17
 const MAX_BATCHES = 40
 const CANDIDATES_PER_PAGE = 3
+const TRAFFIC_FETCH_PADDING_METERS = 300
+const TRAFFIC_DATA_WARNING =
+  'Crossing data unavailable right now — showing routes without crossing avoidance.'
+
+interface TrafficNodes {
+  signalNodes: OverpassNode[]
+  crossingNodes: OverpassNode[]
+}
+
+const EMPTY_TRAFFIC_NODES: TrafficNodes = { signalNodes: [], crossingNodes: [] }
 
 function loopWaypoints(start: LatLng, radiusMeters: number, rotationDeg: number): LatLng[] {
   return [0, 120, 240].map((offset) => destinationPoint(start, rotationDeg + offset, radiusMeters))
@@ -81,39 +91,40 @@ interface CandidateCache {
   signature: string
   nextBatchIndex: number
   pendingQueue: GeneratedRoute[]
+  trafficNodes: TrafficNodes
 }
 
-function emptyCache(signature: string): CandidateCache {
-  return { signature, nextBatchIndex: 0, pendingQueue: [] }
+function emptyCache(signature: string, trafficNodes: TrafficNodes): CandidateCache {
+  return { signature, nextBatchIndex: 0, pendingQueue: [], trafficNodes }
 }
 
 export function useRouteGenerator() {
   const routesLibrary = useMapsLibrary('routes')
   const elevationLibrary = useMapsLibrary('elevation')
-  const cacheRef = useRef<CandidateCache>(emptyCache(''))
+  const cacheRef = useRef<CandidateCache>(emptyCache('', EMPTY_TRAFFIC_NODES))
+  const [trafficDataWarning, setTrafficDataWarning] = useState<string | null>(null)
 
-  const directionsService = useMemo(
-    () => (routesLibrary ? new routesLibrary.DirectionsService() : null),
-    [routesLibrary],
-  )
   const elevationService = useMemo(
     () => (elevationLibrary ? new elevationLibrary.ElevationService() : null),
     [elevationLibrary],
   )
 
   async function routeForWaypoints(start: LatLng, waypoints: LatLng[]) {
-    if (!directionsService) throw new Error('Directions service not ready')
+    if (!routesLibrary) throw new Error('Routes library not ready')
 
-    const result = await directionsService.route({
+    const { routes } = await routesLibrary.Route.computeRoutes({
       origin: start,
       destination: start,
-      waypoints: waypoints.map((location) => ({ location, stopover: true })),
+      intermediates: waypoints.map((location) => ({ location })),
       travelMode: google.maps.TravelMode.WALKING,
+      fields: ['distanceMeters', 'path'],
     })
 
-    const route = result.routes[0]
-    const distanceMeters = route.legs.reduce((sum, leg) => sum + (leg.distance?.value ?? 0), 0)
-    const path = route.overview_path.map((p) => ({ lat: p.lat(), lng: p.lng() }))
+    const route = routes?.[0]
+    if (!route?.path) throw new Error('No route found')
+
+    const distanceMeters = route.distanceMeters ?? 0
+    const path = route.path.map((p) => ({ lat: p.lat, lng: p.lng }))
 
     return { path, distanceMeters }
   }
@@ -122,6 +133,7 @@ export function useRouteGenerator() {
     start: LatLng,
     radiusMeters: number,
     rotationDeg: number,
+    trafficNodes: TrafficNodes,
     requiredStop?: LatLng,
   ): Promise<GeneratedRoute | null> {
     if (!elevationService) throw new Error('Elevation service not ready')
@@ -138,29 +150,31 @@ export function useRouteGenerator() {
       })
       const gain = elevationGainMeters(elevationResult.results.map((r) => r.elevation))
 
-      const { trafficSignalCount, crossingCount } = await countTrafficSignalsAndCrossings(path)
-
       return {
         path,
         waypoints,
         distanceMeters,
         elevationGainMeters: gain,
-        trafficSignalCount,
-        crossingCount,
+        trafficSignalCount: countNodesNearPath(trafficNodes.signalNodes, path),
+        crossingCount: countNodesNearPath(trafficNodes.crossingNodes, path),
       }
     } catch {
       return null
     }
   }
 
-  async function computeBatch(request: RouteRequest, batchIndex: number): Promise<GeneratedRoute[]> {
+  async function computeBatch(
+    request: RouteRequest,
+    batchIndex: number,
+    trafficNodes: TrafficNodes,
+  ): Promise<GeneratedRoute[]> {
     const radiusMeters = (request.distanceMeters / (2 * Math.PI)) * LOOP_RADIUS_CALIBRATION
     const rotations = rotationsForBatch(batchIndex)
 
     const raw = (
       await Promise.all(
         rotations.map((rotation) =>
-          buildCandidate(request.start, radiusMeters, rotation, request.requiredStop),
+          buildCandidate(request.start, radiusMeters, rotation, trafficNodes, request.requiredStop),
         ),
       )
     ).filter((c): c is GeneratedRoute => c !== null)
@@ -169,18 +183,32 @@ export function useRouteGenerator() {
   }
 
   async function loadNextCandidates(request: RouteRequest): Promise<GeneratedRoute[]> {
-    if (!directionsService || !elevationService) {
+    if (!routesLibrary || !elevationService) {
       throw new Error('Maps services are still loading, try again in a moment.')
     }
 
     const signature = JSON.stringify(request)
     if (cacheRef.current.signature !== signature) {
-      cacheRef.current = emptyCache(signature)
+      const radiusMeters = (request.distanceMeters / (2 * Math.PI)) * LOOP_RADIUS_CALIBRATION
+      const requiredStopDistance = request.requiredStop
+        ? haversineDistanceMeters(request.start, request.requiredStop)
+        : 0
+      const fetchRadius = Math.max(radiusMeters, requiredStopDistance) + TRAFFIC_FETCH_PADDING_METERS
+
+      let trafficNodes = EMPTY_TRAFFIC_NODES
+      try {
+        trafficNodes = await fetchNearbyTrafficNodes(request.start, fetchRadius)
+        setTrafficDataWarning(null)
+      } catch {
+        setTrafficDataWarning(TRAFFIC_DATA_WARNING)
+      }
+
+      cacheRef.current = emptyCache(signature, trafficNodes)
     }
     const cache = cacheRef.current
 
     while (cache.pendingQueue.length < CANDIDATES_PER_PAGE && cache.nextBatchIndex < MAX_BATCHES) {
-      const batch = await computeBatch(request, cache.nextBatchIndex)
+      const batch = await computeBatch(request, cache.nextBatchIndex, cache.trafficNodes)
       cache.nextBatchIndex += 1
       cache.pendingQueue.push(...batch)
     }
@@ -194,6 +222,7 @@ export function useRouteGenerator() {
 
   return {
     loadNextCandidates,
-    ready: Boolean(directionsService && elevationService),
+    ready: Boolean(routesLibrary && elevationService),
+    trafficDataWarning,
   }
 }

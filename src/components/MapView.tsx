@@ -1,5 +1,6 @@
-import { Map, Marker, Polyline } from '@vis.gl/react-google-maps'
+import { AdvancedMarker, Map, Pin, Polyline } from '@vis.gl/react-google-maps'
 import type { LatLng } from '../types/route'
+import { GOOGLE_MAPS_MAP_ID } from '../config/env'
 
 interface MapViewProps {
   start: LatLng | null
@@ -9,14 +10,11 @@ interface MapViewProps {
   onMapClick: (point: LatLng) => void
 }
 
-const REQUIRED_STOP_ICON: google.maps.Icon = {
-  url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
-}
-
 export function MapView({ start, requiredStop, path, initialCenter, onMapClick }: MapViewProps) {
   return (
     <Map
       className="map-view"
+      mapId={GOOGLE_MAPS_MAP_ID}
       defaultCenter={initialCenter}
       defaultZoom={14}
       gestureHandling="greedy"
@@ -25,8 +23,12 @@ export function MapView({ start, requiredStop, path, initialCenter, onMapClick }
         if (e.detail.latLng) onMapClick(e.detail.latLng)
       }}
     >
-      {start && <Marker position={start} />}
-      {requiredStop && <Marker position={requiredStop} icon={REQUIRED_STOP_ICON} />}
+      {start && <AdvancedMarker position={start} />}
+      {requiredStop && (
+        <AdvancedMarker position={requiredStop}>
+          <Pin background="#c0392b" borderColor="#962d22" glyphColor="#fff" />
+        </AdvancedMarker>
+      )}
       {path.length > 0 && <Polyline path={path} />}
     </Map>
   )

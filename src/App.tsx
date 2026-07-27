@@ -20,7 +20,7 @@ import './App.css'
 function AppInner() {
   const { unitSystem } = useUnitSystem()
   const initialCenter = useInitialMapCenter()
-  const { loadNextCandidates, ready } = useRouteGenerator()
+  const { loadNextCandidates, ready, trafficDataWarning } = useRouteGenerator()
 
   const [start, setStart] = useState<LatLng | null>(null)
   const [requiredStop, setRequiredStop] = useState<LatLng | null>(null)
@@ -104,6 +104,7 @@ function AppInner() {
         <RouteControls onSubmit={handleGenerate} disabled={!start || !ready || loading} />
         {loading && <p>Generating route...</p>}
         {error && <p className="error">{error}</p>}
+        {trafficDataWarning && <p className="warning">{trafficDataWarning}</p>}
 
         {candidates.length > 0 && (
           <>

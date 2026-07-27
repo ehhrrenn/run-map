@@ -15,6 +15,10 @@ Firebase Hosting.
    - A Google Maps API key with the **Maps JavaScript API**, **Directions
      API**, **Roads API**, and **Elevation API** enabled (Google Cloud
      Console).
+   - Optionally, a Map ID (Cloud Console > Google Maps Platform > Map
+     Management) for `VITE_GOOGLE_MAPS_MAP_ID`, needed for custom marker
+     styling via `AdvancedMarker`. Defaults to Google's public demo Map ID
+     (watermarked) if left unset.
    - Your Firebase web app config (Firebase Console > Project settings >
      Your apps). Firestore is wired up for saving/sharing routes later, but
      is optional to start.
@@ -42,8 +46,8 @@ firebase deploy --only hosting
     Admin, generated via `firebase init hosting:github` or the Firebase
     Console)
   - `FIREBASE_PROJECT_ID`
-  - `VITE_GOOGLE_MAPS_API_KEY` and the `VITE_FIREBASE_*` config values from
-    `.env.example`
+  - `VITE_GOOGLE_MAPS_API_KEY`, optionally `VITE_GOOGLE_MAPS_MAP_ID`, and the
+    `VITE_FIREBASE_*` config values from `.env.example`
 
 ## Project structure
 
