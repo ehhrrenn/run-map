@@ -12,9 +12,9 @@ Firebase Hosting.
    npm install
    ```
 2. Copy `.env.example` to `.env.local` and fill in:
-   - A Google Maps API key with the **Maps JavaScript API**, **Directions
-     API**, **Roads API**, and **Elevation API** enabled (Google Cloud
-     Console).
+   - A Google Maps API key with the **Maps JavaScript API**, **Routes API**,
+     and **Elevation API** enabled (Google Cloud Console). If the key has API
+     restrictions configured, make sure Routes API is in the allowed list.
    - Optionally, a Map ID (Cloud Console > Google Maps Platform > Map
      Management) for `VITE_GOOGLE_MAPS_MAP_ID`, needed for custom marker
      styling via `AdvancedMarker`. Defaults to Google's public demo Map ID
@@ -59,7 +59,6 @@ src/
   types/        # RouteRequest / GeneratedRoute types
 ```
 
-Route generation (turning a start point + preferences into an actual loop
-that respects distance/elevation/crossing constraints) is stubbed out in
-`App.tsx` and is the core algorithm still to be built, likely using the
-Directions, Roads, and Elevation APIs together.
+Route generation (`src/hooks/useRouteGenerator.ts`) builds candidate loop
+routes via the Routes API, scores them by elevation gain (Elevation API) and
+nearby traffic signals/crossings (OpenStreetMap Overpass API).

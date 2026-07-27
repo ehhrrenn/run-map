@@ -108,6 +108,7 @@ export function useRouteGenerator() {
   const routesLibrary = useMapsLibrary('routes')
   const elevationLibrary = useMapsLibrary('elevation')
   const cacheRef = useRef<CandidateCache>(emptyCache('', EMPTY_TRAFFIC_NODES))
+  const lastErrorRef = useRef<string | null>(null)
   const [trafficDataWarning, setTrafficDataWarning] = useState<string | null>(null)
 
   const elevationService = useMemo(
@@ -164,7 +165,9 @@ export function useRouteGenerator() {
         trafficSignalCount: countNodesNearPath(trafficNodes.signalNodes, path),
         crossingCount: countNodesNearPath(trafficNodes.crossingNodes, path),
       }
-    } catch {
+    } catch (err) {
+      lastErrorRef.current = err instanceof Error ? err.message : String(err)
+      console.error('Route candidate failed:', err)
       return null
     }
   }
@@ -214,9 +217,22 @@ export function useRouteGenerator() {
     const cache = cacheRef.current
 
     while (cache.pendingQueue.length < CANDIDATES_PER_PAGE && cache.nextBatchIndex < MAX_BATCHES) {
+      const isFirstBatch = cache.nextBatchIndex === 0
       const batch = await computeBatch(request, cache.nextBatchIndex, cache.trafficNodes)
       cache.nextBatchIndex += 1
       cache.pendingQueue.push(...batch)
+
+      if (isFirstBatch && batch.length === 0) {
+        // Every candidate failing on the very first attempt means something
+        // systemic is wrong (API config, auth, network) - not that this
+        // particular spot has no walkable routes. Fail fast with the real
+        // reason instead of burning the full retry budget on a doomed request.
+        throw new Error(
+          lastErrorRef.current
+            ? `Route generation failed: ${lastErrorRef.current}`
+            : 'Could not generate any routes near this location.',
+        )
+      }
     }
 
     const page = cache.pendingQueue.splice(0, CANDIDATES_PER_PAGE)
