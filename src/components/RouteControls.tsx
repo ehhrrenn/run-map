@@ -34,9 +34,11 @@ export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
         onSubmit({ distanceMeters, maxElevationGainMeters, avoidTrafficSignals })
       }}
     >
-      <label>
+      <label htmlFor="distance">
         Distance ({distanceUnitLabel(unitSystem)})
         <input
+          id="distance"
+          name="distance"
           type="number"
           min={0.1}
           step={0.1}
@@ -45,9 +47,11 @@ export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
         />
       </label>
 
-      <label>
+      <label htmlFor="max-elevation-gain">
         Max elevation gain ({elevationUnitLabel(unitSystem)})
         <input
+          id="max-elevation-gain"
+          name="maxElevationGain"
           type="number"
           min={0}
           step={1}
@@ -58,8 +62,10 @@ export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
         />
       </label>
 
-      <label className="checkbox">
+      <label className="checkbox" htmlFor="avoid-traffic-signals">
         <input
+          id="avoid-traffic-signals"
+          name="avoidTrafficSignals"
           type="checkbox"
           checked={avoidTrafficSignals}
           onChange={(e) => setAvoidTrafficSignals(e.target.checked)}
