@@ -3,6 +3,7 @@ import { useMapsLibrary } from '@vis.gl/react-google-maps'
 import type { GeneratedRoute, LatLng, RouteRequest } from '../types/route'
 import { angularDiffDeg, bearingDegBetween, destinationPoint, haversineDistanceMeters } from '../lib/geo'
 import { countNodesNearPath, fetchNearbyTrafficNodes, type OverpassNode } from '../lib/crossings'
+import { fetchNearbyPedestrianTrails, snapToNearestTrail, type PedestrianTrail } from '../lib/trails'
 
 const CANDIDATE_ROTATIONS_DEG = [0, 60, 120, 180, 240, 300]
 // Real streets zigzag relative to a straight loop, so a circle sized exactly
@@ -26,8 +27,14 @@ interface TrafficNodes {
 
 const EMPTY_TRAFFIC_NODES: TrafficNodes = { signalNodes: [], crossingNodes: [] }
 
-function loopWaypoints(start: LatLng, radiusMeters: number, rotationDeg: number): LatLng[] {
-  return [0, 120, 240].map((offset) => destinationPoint(start, rotationDeg + offset, radiusMeters))
+function loopWaypoints(
+  start: LatLng,
+  radiusMeters: number,
+  rotationDeg: number,
+  trails: PedestrianTrail[] = [],
+): LatLng[] {
+  const points = [0, 120, 240].map((offset) => destinationPoint(start, rotationDeg + offset, radiusMeters))
+  return trails.length === 0 ? points : points.map((p) => snapToNearestTrail(p, trails))
 }
 
 function nearestWaypointIndex(basePoints: LatLng[], start: LatLng, target: LatLng): number {
@@ -49,8 +56,9 @@ function loopWaypointsWithRequiredStop(
   radiusMeters: number,
   rotationDeg: number,
   requiredStop: LatLng,
+  trails: PedestrianTrail[] = [],
 ): LatLng[] {
-  const base = loopWaypoints(start, radiusMeters, rotationDeg)
+  const base = loopWaypoints(start, radiusMeters, rotationDeg, trails)
   const index = nearestWaypointIndex(base, start, requiredStop)
   const result = [...base]
   result[index] = requiredStop
@@ -98,16 +106,21 @@ interface CandidateCache {
   nextBatchIndex: number
   pendingQueue: GeneratedRoute[]
   trafficNodes: TrafficNodes
+  trails: PedestrianTrail[]
 }
 
-function emptyCache(signature: string, trafficNodes: TrafficNodes): CandidateCache {
-  return { signature, nextBatchIndex: 0, pendingQueue: [], trafficNodes }
+function emptyCache(
+  signature: string,
+  trafficNodes: TrafficNodes,
+  trails: PedestrianTrail[],
+): CandidateCache {
+  return { signature, nextBatchIndex: 0, pendingQueue: [], trafficNodes, trails }
 }
 
 export function useRouteGenerator() {
   const routesLibrary = useMapsLibrary('routes')
   const elevationLibrary = useMapsLibrary('elevation')
-  const cacheRef = useRef<CandidateCache>(emptyCache('', EMPTY_TRAFFIC_NODES))
+  const cacheRef = useRef<CandidateCache>(emptyCache('', EMPTY_TRAFFIC_NODES, []))
   const lastErrorRef = useRef<string | null>(null)
   const [trafficDataWarning, setTrafficDataWarning] = useState<string | null>(null)
 
@@ -141,14 +154,15 @@ export function useRouteGenerator() {
     radiusMeters: number,
     rotationDeg: number,
     trafficNodes: TrafficNodes,
+    trails: PedestrianTrail[],
     requiredStop?: LatLng,
   ): Promise<GeneratedRoute | null> {
     if (!elevationService) throw new Error('Elevation service not ready')
 
     try {
       const waypoints = requiredStop
-        ? loopWaypointsWithRequiredStop(start, radiusMeters, rotationDeg, requiredStop)
-        : loopWaypoints(start, radiusMeters, rotationDeg)
+        ? loopWaypointsWithRequiredStop(start, radiusMeters, rotationDeg, requiredStop, trails)
+        : loopWaypoints(start, radiusMeters, rotationDeg, trails)
       const { path, distanceMeters } = await routeForWaypoints(start, waypoints)
 
       const elevationResult = await elevationService.getElevationAlongPath({
@@ -176,6 +190,7 @@ export function useRouteGenerator() {
     request: RouteRequest,
     batchIndex: number,
     trafficNodes: TrafficNodes,
+    trails: PedestrianTrail[],
   ): Promise<GeneratedRoute[]> {
     const radiusMeters = (request.distanceMeters / (2 * Math.PI)) * LOOP_RADIUS_CALIBRATION
     const rotations = rotationsForBatch(batchIndex)
@@ -183,7 +198,14 @@ export function useRouteGenerator() {
     const raw = (
       await Promise.all(
         rotations.map((rotation) =>
-          buildCandidate(request.start, radiusMeters, rotation, trafficNodes, request.requiredStop),
+          buildCandidate(
+            request.start,
+            radiusMeters,
+            rotation,
+            trafficNodes,
+            trails,
+            request.requiredStop,
+          ),
         ),
       )
     ).filter((c): c is GeneratedRoute => c !== null)
@@ -204,21 +226,30 @@ export function useRouteGenerator() {
         : 0
       const fetchRadius = Math.max(radiusMeters, requiredStopDistance) + TRAFFIC_FETCH_PADDING_METERS
 
-      let trafficNodes = EMPTY_TRAFFIC_NODES
-      try {
-        trafficNodes = await fetchNearbyTrafficNodes(request.start, fetchRadius)
+      // Only worth the extra query when the user actually wants to avoid
+      // crossings - otherwise there's nothing to bias the loop shape toward.
+      const [trafficNodesResult, trailsResult] = await Promise.allSettled([
+        fetchNearbyTrafficNodes(request.start, fetchRadius),
+        request.avoidTrafficSignals
+          ? fetchNearbyPedestrianTrails(request.start, fetchRadius)
+          : Promise.resolve<PedestrianTrail[]>([]),
+      ])
+
+      if (trafficNodesResult.status === 'fulfilled') {
         setTrafficDataWarning(null)
-      } catch {
+      } else {
         setTrafficDataWarning(TRAFFIC_DATA_WARNING)
       }
+      const trafficNodes = trafficNodesResult.status === 'fulfilled' ? trafficNodesResult.value : EMPTY_TRAFFIC_NODES
+      const trails = trailsResult.status === 'fulfilled' ? trailsResult.value : []
 
-      cacheRef.current = emptyCache(signature, trafficNodes)
+      cacheRef.current = emptyCache(signature, trafficNodes, trails)
     }
     const cache = cacheRef.current
 
     while (cache.pendingQueue.length < CANDIDATES_PER_PAGE && cache.nextBatchIndex < MAX_BATCHES) {
       const isFirstBatch = cache.nextBatchIndex === 0
-      const batch = await computeBatch(request, cache.nextBatchIndex, cache.trafficNodes)
+      const batch = await computeBatch(request, cache.nextBatchIndex, cache.trafficNodes, cache.trails)
       cache.nextBatchIndex += 1
       cache.pendingQueue.push(...batch)
 

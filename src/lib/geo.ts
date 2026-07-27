@@ -59,9 +59,14 @@ export function angularDiffDeg(a: number, b: number): number {
   return diff > 180 ? 360 - diff : diff
 }
 
-/** Shortest distance in meters from a point to a segment, using a flat-earth
+interface NearestPointResult {
+  point: LatLng
+  distanceMeters: number
+}
+
+/** Nearest point on a segment to the given point, using a flat-earth
  * approximation local to the segment (fine at street scale). */
-export function distanceToSegmentMeters(point: LatLng, a: LatLng, b: LatLng): number {
+export function nearestPointOnSegment(point: LatLng, a: LatLng, b: LatLng): NearestPointResult {
   const latRef = toRad(a.lat)
   const metersPerDegLat = 111320
   const metersPerDegLng = 111320 * Math.cos(latRef)
@@ -70,24 +75,36 @@ export function distanceToSegmentMeters(point: LatLng, a: LatLng, b: LatLng): nu
     x: (p.lng - a.lng) * metersPerDegLng,
     y: (p.lat - a.lat) * metersPerDegLat,
   })
+  const fromXY = (xy: { x: number; y: number }): LatLng => ({
+    lat: a.lat + xy.y / metersPerDegLat,
+    lng: a.lng + xy.x / metersPerDegLng,
+  })
 
   const p = toXY(point)
   const bXY = toXY(b)
 
   const segLengthSq = bXY.x ** 2 + bXY.y ** 2
-  if (segLengthSq === 0) return Math.hypot(p.x, p.y)
+  if (segLengthSq === 0) return { point: a, distanceMeters: Math.hypot(p.x, p.y) }
 
   const t = Math.max(0, Math.min(1, (p.x * bXY.x + p.y * bXY.y) / segLengthSq))
-  const projX = t * bXY.x
-  const projY = t * bXY.y
+  const proj = { x: t * bXY.x, y: t * bXY.y }
 
-  return Math.hypot(p.x - projX, p.y - projY)
+  return { point: fromXY(proj), distanceMeters: Math.hypot(p.x - proj.x, p.y - proj.y) }
+}
+
+export function distanceToSegmentMeters(point: LatLng, a: LatLng, b: LatLng): number {
+  return nearestPointOnSegment(point, a, b).distanceMeters
+}
+
+export function nearestPointOnPath(point: LatLng, path: LatLng[]): NearestPointResult {
+  let best: NearestPointResult = { point: path[0], distanceMeters: Infinity }
+  for (let i = 1; i < path.length; i++) {
+    const candidate = nearestPointOnSegment(point, path[i - 1], path[i])
+    if (candidate.distanceMeters < best.distanceMeters) best = candidate
+  }
+  return best
 }
 
 export function distanceToPathMeters(point: LatLng, path: LatLng[]): number {
-  let min = Infinity
-  for (let i = 1; i < path.length; i++) {
-    min = Math.min(min, distanceToSegmentMeters(point, path[i - 1], path[i]))
-  }
-  return min
+  return nearestPointOnPath(point, path).distanceMeters
 }
