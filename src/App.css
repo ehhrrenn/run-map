@@ -1,0 +1,46 @@
+.app-layout {
+  display: flex;
+  height: 100svh;
+}
+
+.sidebar {
+  width: 320px;
+  flex: none;
+  padding: 24px;
+  overflow-y: auto;
+  border-right: 1px solid #e5e4e7;
+}
+
+main {
+  flex: 1;
+}
+
+.map-view {
+  width: 100%;
+  height: 100%;
+}
+
+.route-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.route-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.route-controls label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.error {
+  color: #c0392b;
+  font-size: 14px;
+}
