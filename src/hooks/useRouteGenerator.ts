@@ -1,24 +1,52 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useMapsLibrary } from '@vis.gl/react-google-maps'
 import type { GeneratedRoute, LatLng, RouteRequest } from '../types/route'
-import { destinationPoint } from '../lib/geo'
+import { angularDiffDeg, bearingDegBetween, destinationPoint } from '../lib/geo'
 import { countTrafficSignalsAndCrossings } from '../lib/crossings'
 
 const CANDIDATE_ROTATIONS_DEG = [0, 60, 120, 180, 240, 300]
 // Real streets zigzag relative to a straight loop, so a circle sized exactly
 // to the target distance under-shoots once routed onto the road network.
 const LOOP_RADIUS_CALIBRATION = 0.72
-
-interface Candidate {
-  path: LatLng[]
-  distanceMeters: number
-  elevationGainMeters: number
-  trafficSignalCount: number
-  crossingCount: number
-}
+// Coprime with the 60-degree spacing above, so shifting the rotation set by
+// this much per batch never reproduces an earlier batch's angles.
+const BATCH_ROTATION_STEP_DEG = 17
+const MAX_BATCHES = 40
+const CANDIDATES_PER_PAGE = 3
 
 function loopWaypoints(start: LatLng, radiusMeters: number, rotationDeg: number): LatLng[] {
   return [0, 120, 240].map((offset) => destinationPoint(start, rotationDeg + offset, radiusMeters))
+}
+
+function nearestWaypointIndex(basePoints: LatLng[], start: LatLng, target: LatLng): number {
+  const targetBearing = bearingDegBetween(start, target)
+  let bestIndex = 0
+  let bestDiff = Infinity
+  basePoints.forEach((point, index) => {
+    const diff = angularDiffDeg(bearingDegBetween(start, point), targetBearing)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      bestIndex = index
+    }
+  })
+  return bestIndex
+}
+
+function loopWaypointsWithRequiredStop(
+  start: LatLng,
+  radiusMeters: number,
+  rotationDeg: number,
+  requiredStop: LatLng,
+): LatLng[] {
+  const base = loopWaypoints(start, radiusMeters, rotationDeg)
+  const index = nearestWaypointIndex(base, start, requiredStop)
+  const result = [...base]
+  result[index] = requiredStop
+  return result
+}
+
+function rotationsForBatch(batchIndex: number): number[] {
+  return CANDIDATE_ROTATIONS_DEG.map((deg) => (deg + batchIndex * BATCH_ROTATION_STEP_DEG) % 360)
 }
 
 function elevationGainMeters(elevations: number[]): number {
@@ -30,9 +58,39 @@ function elevationGainMeters(elevations: number[]): number {
   return gain
 }
 
+function scoreCandidates(candidates: GeneratedRoute[], request: RouteRequest): GeneratedRoute[] {
+  const withinElevationLimit = candidates.filter(
+    (c) => c.elevationGainMeters <= request.maxElevationGainMeters,
+  )
+  const pool = withinElevationLimit.length > 0 ? withinElevationLimit : candidates
+
+  return [...pool].sort((a, b) => {
+    if (request.avoidTrafficSignals) {
+      const crossingsA = a.trafficSignalCount + a.crossingCount
+      const crossingsB = b.trafficSignalCount + b.crossingCount
+      if (crossingsA !== crossingsB) return crossingsA - crossingsB
+    }
+    return (
+      Math.abs(a.distanceMeters - request.distanceMeters) -
+      Math.abs(b.distanceMeters - request.distanceMeters)
+    )
+  })
+}
+
+interface CandidateCache {
+  signature: string
+  nextBatchIndex: number
+  pendingQueue: GeneratedRoute[]
+}
+
+function emptyCache(signature: string): CandidateCache {
+  return { signature, nextBatchIndex: 0, pendingQueue: [] }
+}
+
 export function useRouteGenerator() {
   const routesLibrary = useMapsLibrary('routes')
   const elevationLibrary = useMapsLibrary('elevation')
+  const cacheRef = useRef<CandidateCache>(emptyCache(''))
 
   const directionsService = useMemo(
     () => (routesLibrary ? new routesLibrary.DirectionsService() : null),
@@ -60,11 +118,18 @@ export function useRouteGenerator() {
     return { path, distanceMeters }
   }
 
-  async function buildCandidate(start: LatLng, radiusMeters: number, rotationDeg: number): Promise<Candidate | null> {
+  async function buildCandidate(
+    start: LatLng,
+    radiusMeters: number,
+    rotationDeg: number,
+    requiredStop?: LatLng,
+  ): Promise<GeneratedRoute | null> {
     if (!elevationService) throw new Error('Elevation service not ready')
 
     try {
-      const waypoints = loopWaypoints(start, radiusMeters, rotationDeg)
+      const waypoints = requiredStop
+        ? loopWaypointsWithRequiredStop(start, radiusMeters, rotationDeg, requiredStop)
+        : loopWaypoints(start, radiusMeters, rotationDeg)
       const { path, distanceMeters } = await routeForWaypoints(start, waypoints)
 
       const elevationResult = await elevationService.getElevationAlongPath({
@@ -77,6 +142,7 @@ export function useRouteGenerator() {
 
       return {
         path,
+        waypoints,
         distanceMeters,
         elevationGainMeters: gain,
         trafficSignalCount,
@@ -87,53 +153,47 @@ export function useRouteGenerator() {
     }
   }
 
-  async function generateRoute(request: RouteRequest): Promise<GeneratedRoute> {
+  async function computeBatch(request: RouteRequest, batchIndex: number): Promise<GeneratedRoute[]> {
+    const radiusMeters = (request.distanceMeters / (2 * Math.PI)) * LOOP_RADIUS_CALIBRATION
+    const rotations = rotationsForBatch(batchIndex)
+
+    const raw = (
+      await Promise.all(
+        rotations.map((rotation) =>
+          buildCandidate(request.start, radiusMeters, rotation, request.requiredStop),
+        ),
+      )
+    ).filter((c): c is GeneratedRoute => c !== null)
+
+    return scoreCandidates(raw, request)
+  }
+
+  async function loadNextCandidates(request: RouteRequest): Promise<GeneratedRoute[]> {
     if (!directionsService || !elevationService) {
       throw new Error('Maps services are still loading, try again in a moment.')
     }
 
-    const radiusMeters = (request.distanceMeters / (2 * Math.PI)) * LOOP_RADIUS_CALIBRATION
+    const signature = JSON.stringify(request)
+    if (cacheRef.current.signature !== signature) {
+      cacheRef.current = emptyCache(signature)
+    }
+    const cache = cacheRef.current
 
-    const candidates = (
-      await Promise.all(
-        CANDIDATE_ROTATIONS_DEG.map((rotation) => buildCandidate(request.start, radiusMeters, rotation)),
-      )
-    ).filter((c): c is Candidate => c !== null)
-
-    if (candidates.length === 0) {
-      throw new Error('Could not find a route near this location. Try a different starting point.')
+    while (cache.pendingQueue.length < CANDIDATES_PER_PAGE && cache.nextBatchIndex < MAX_BATCHES) {
+      const batch = await computeBatch(request, cache.nextBatchIndex)
+      cache.nextBatchIndex += 1
+      cache.pendingQueue.push(...batch)
     }
 
-    const withinElevationLimit = candidates.filter(
-      (c) => c.elevationGainMeters <= request.maxElevationGainMeters,
-    )
-    const pool = withinElevationLimit.length > 0 ? withinElevationLimit : candidates
-
-    const scored = [...pool].sort((a, b) => {
-      if (request.avoidTrafficSignals) {
-        const crossingsA = a.trafficSignalCount + a.crossingCount
-        const crossingsB = b.trafficSignalCount + b.crossingCount
-        if (crossingsA !== crossingsB) return crossingsA - crossingsB
-      }
-      return (
-        Math.abs(a.distanceMeters - request.distanceMeters) -
-        Math.abs(b.distanceMeters - request.distanceMeters)
-      )
-    })
-
-    const best = scored[0]
-    return {
-      path: best.path,
-      distanceMeters: best.distanceMeters,
-      elevationGainMeters: best.elevationGainMeters,
-      trafficSignalCount: best.trafficSignalCount,
-      crossingCount: best.crossingCount,
+    const page = cache.pendingQueue.splice(0, CANDIDATES_PER_PAGE)
+    if (page.length === 0) {
+      throw new Error('Could not find more distinct routes near this location.')
     }
+    return page
   }
 
   return {
-    generateRoute,
+    loadNextCandidates,
     ready: Boolean(directionsService && elevationService),
   }
 }
-

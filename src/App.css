@@ -11,6 +11,18 @@
   border-right: 1px solid #e5e4e7;
 }
 
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sidebar-header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
 main {
   flex: 1;
 }
@@ -18,6 +30,35 @@ main {
 .map-view {
   width: 100%;
   height: 100%;
+}
+
+.map-view-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #6b6375;
+}
+
+.unit-toggle {
+  display: flex;
+  border: 1px solid #e5e4e7;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.unit-toggle button {
+  border: none;
+  background: none;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.unit-toggle button.selected {
+  background: #6b6375;
+  color: #fff;
 }
 
 .route-controls {
@@ -45,19 +86,52 @@ main {
   font-size: 14px;
 }
 
-.route-summary {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 4px 12px;
-  margin-top: 20px;
-  font-size: 14px;
+.candidate-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.route-summary dt {
+.candidate-card {
+  border: 1px solid #e5e4e7;
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.candidate-card.selected {
+  border-color: #6b6375;
+  background: #f7f6f9;
+}
+
+.candidate-card__stats {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 12px;
+  font-size: 13px;
+  margin: 0;
+}
+
+.candidate-card__stats dt {
   color: #6b6375;
 }
 
-.route-summary dd {
+.candidate-card__stats dd {
   margin: 0;
   font-weight: 600;
+}
+
+.candidate-card__actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.load-more-button {
+  margin-top: 12px;
+  align-self: flex-start;
 }

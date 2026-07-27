@@ -8,10 +8,12 @@ export interface RouteRequest {
   distanceMeters: number
   maxElevationGainMeters: number
   avoidTrafficSignals: boolean
+  requiredStop?: LatLng
 }
 
 export interface GeneratedRoute {
   path: LatLng[]
+  waypoints: LatLng[]
   distanceMeters: number
   elevationGainMeters: number
   trafficSignalCount: number

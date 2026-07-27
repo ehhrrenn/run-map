@@ -1,14 +1,29 @@
 import { useState } from 'react'
 import type { RouteRequest } from '../types/route'
+import { useUnitSystem } from '../hooks/useUnitSystem'
+import {
+  distanceToMeters,
+  distanceUnitLabel,
+  elevationToMeters,
+  elevationUnitLabel,
+  metersToDistance,
+  metersToElevation,
+} from '../lib/units'
 
 interface RouteControlsProps {
   onSubmit: (request: Omit<RouteRequest, 'start'>) => void
   disabled?: boolean
 }
 
+const DEFAULT_DISTANCE_METERS = 5000
+const DEFAULT_MAX_ELEVATION_GAIN_METERS = 50
+
 export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
-  const [distanceKm, setDistanceKm] = useState(5)
-  const [maxElevationGain, setMaxElevationGain] = useState(50)
+  const { unitSystem } = useUnitSystem()
+  const [distanceMeters, setDistanceMeters] = useState(DEFAULT_DISTANCE_METERS)
+  const [maxElevationGainMeters, setMaxElevationGainMeters] = useState(
+    DEFAULT_MAX_ELEVATION_GAIN_METERS,
+  )
   const [avoidTrafficSignals, setAvoidTrafficSignals] = useState(true)
 
   return (
@@ -16,32 +31,30 @@ export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
       className="route-controls"
       onSubmit={(e) => {
         e.preventDefault()
-        onSubmit({
-          distanceMeters: distanceKm * 1000,
-          maxElevationGainMeters: maxElevationGain,
-          avoidTrafficSignals,
-        })
+        onSubmit({ distanceMeters, maxElevationGainMeters, avoidTrafficSignals })
       }}
     >
       <label>
-        Distance (km)
+        Distance ({distanceUnitLabel(unitSystem)})
         <input
           type="number"
-          min={1}
-          step={0.5}
-          value={distanceKm}
-          onChange={(e) => setDistanceKm(Number(e.target.value))}
+          min={0.1}
+          step={0.1}
+          value={metersToDistance(distanceMeters, unitSystem).toFixed(2)}
+          onChange={(e) => setDistanceMeters(distanceToMeters(Number(e.target.value), unitSystem))}
         />
       </label>
 
       <label>
-        Max elevation gain (m)
+        Max elevation gain ({elevationUnitLabel(unitSystem)})
         <input
           type="number"
           min={0}
-          step={5}
-          value={maxElevationGain}
-          onChange={(e) => setMaxElevationGain(Number(e.target.value))}
+          step={1}
+          value={metersToElevation(maxElevationGainMeters, unitSystem).toFixed(0)}
+          onChange={(e) =>
+            setMaxElevationGainMeters(elevationToMeters(Number(e.target.value), unitSystem))
+          }
         />
       </label>
 

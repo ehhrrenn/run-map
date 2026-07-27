@@ -1,29 +1,59 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { APIProvider } from '@vis.gl/react-google-maps'
 import { MapView } from './components/MapView'
 import { RouteControls } from './components/RouteControls'
+import { UnitToggle } from './components/UnitToggle'
 import { useRouteGenerator } from './hooks/useRouteGenerator'
+import { useInitialMapCenter } from './hooks/useInitialMapCenter'
+import { UnitSystemProvider, useUnitSystem } from './hooks/useUnitSystem'
 import { GOOGLE_MAPS_API_KEY } from './config/env'
 import type { GeneratedRoute, LatLng, RouteRequest } from './types/route'
+import {
+  distanceUnitLabel,
+  elevationUnitLabel,
+  metersToDistance,
+  metersToElevation,
+} from './lib/units'
+import { appleMapsWalkingUrl, googleMapsWalkingUrl } from './lib/deeplinks'
 import './App.css'
 
 function AppInner() {
+  const { unitSystem } = useUnitSystem()
+  const initialCenter = useInitialMapCenter()
+  const { loadNextCandidates, ready } = useRouteGenerator()
+
   const [start, setStart] = useState<LatLng | null>(null)
-  const [route, setRoute] = useState<GeneratedRoute | null>(null)
+  const [requiredStop, setRequiredStop] = useState<LatLng | null>(null)
+  const [addingStop, setAddingStop] = useState(false)
+  const [candidates, setCandidates] = useState<GeneratedRoute[]>([])
+  const [selectedIndex, setSelectedIndex] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const { generateRoute, ready } = useRouteGenerator()
+  const [loadingMore, setLoadingMore] = useState(false)
+  const lastRequestRef = useRef<RouteRequest | null>(null)
+
+  function handleMapClick(point: LatLng) {
+    if (addingStop) {
+      setRequiredStop(point)
+      setAddingStop(false)
+    } else {
+      setStart(point)
+    }
+  }
 
   async function handleGenerate(request: Omit<RouteRequest, 'start'>) {
     if (!start) {
       setError('Click the map to choose a starting point first.')
       return
     }
+    const fullRequest: RouteRequest = { ...request, start, requiredStop: requiredStop ?? undefined }
+    lastRequestRef.current = fullRequest
     setError(null)
     setLoading(true)
+    setCandidates([])
+    setSelectedIndex(0)
     try {
-      const generated = await generateRoute({ ...request, start })
-      setRoute(generated)
+      setCandidates(await loadNextCandidates(fullRequest))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not generate a route.')
     } finally {
@@ -31,29 +61,111 @@ function AppInner() {
     }
   }
 
+  async function handleLoadMore() {
+    if (!lastRequestRef.current) return
+    setLoadingMore(true)
+    try {
+      const more = await loadNextCandidates(lastRequestRef.current)
+      setCandidates((prev) => [...prev, ...more])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load more routes.')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  const selected = candidates[selectedIndex] ?? null
+
   return (
     <div className="app-layout">
       <aside className="sidebar">
-        <h1>Run Map</h1>
+        <div className="sidebar-header">
+          <h1>Run Map</h1>
+          <UnitToggle />
+        </div>
         <p>Click the map to set a starting point, then set your preferences.</p>
+
+        {requiredStop ? (
+          <button
+            type="button"
+            onClick={() => {
+              setRequiredStop(null)
+              setAddingStop(false)
+            }}
+          >
+            Remove required stop
+          </button>
+        ) : (
+          <button type="button" onClick={() => setAddingStop((v) => !v)}>
+            {addingStop ? 'Click the map to place it (cancel)' : 'Add a required stop'}
+          </button>
+        )}
+
         <RouteControls onSubmit={handleGenerate} disabled={!start || !ready || loading} />
         {loading && <p>Generating route...</p>}
         {error && <p className="error">{error}</p>}
-        {route && !loading && (
-          <dl className="route-summary">
-            <dt>Distance</dt>
-            <dd>{(route.distanceMeters / 1000).toFixed(2)} km</dd>
-            <dt>Elevation gain</dt>
-            <dd>{route.elevationGainMeters.toFixed(0)} m</dd>
-            <dt>Traffic signals</dt>
-            <dd>{route.trafficSignalCount}</dd>
-            <dt>Crossings</dt>
-            <dd>{route.crossingCount}</dd>
-          </dl>
+
+        {candidates.length > 0 && (
+          <>
+            <ul className="candidate-list">
+              {candidates.map((candidate, index) => (
+                <li
+                  key={index}
+                  className={`candidate-card${index === selectedIndex ? ' selected' : ''}`}
+                  onClick={() => setSelectedIndex(index)}
+                >
+                  <dl className="candidate-card__stats">
+                    <dt>Distance</dt>
+                    <dd>
+                      {metersToDistance(candidate.distanceMeters, unitSystem).toFixed(2)}{' '}
+                      {distanceUnitLabel(unitSystem)}
+                    </dd>
+                    <dt>Elevation gain</dt>
+                    <dd>
+                      {metersToElevation(candidate.elevationGainMeters, unitSystem).toFixed(0)}{' '}
+                      {elevationUnitLabel(unitSystem)}
+                    </dd>
+                    <dt>Traffic signals</dt>
+                    <dd>{candidate.trafficSignalCount}</dd>
+                    <dt>Crossings</dt>
+                    <dd>{candidate.crossingCount}</dd>
+                  </dl>
+                  {index === selectedIndex && start && (
+                    <div className="candidate-card__actions">
+                      <a href={googleMapsWalkingUrl(start, candidate.waypoints)} target="_blank" rel="noreferrer">
+                        Open in Google Maps
+                      </a>
+                      <a href={appleMapsWalkingUrl(start, candidate.waypoints)} target="_blank" rel="noreferrer">
+                        Open in Apple Maps
+                      </a>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="load-more-button"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading...' : 'Load more routes'}
+            </button>
+          </>
         )}
       </aside>
       <main>
-        <MapView start={start} path={route?.path ?? []} onMapClick={setStart} />
+        {initialCenter ? (
+          <MapView
+            start={start}
+            requiredStop={requiredStop}
+            path={selected?.path ?? []}
+            initialCenter={initialCenter}
+            onMapClick={handleMapClick}
+          />
+        ) : (
+          <div className="map-view-loading">Locating you…</div>
+        )}
       </main>
     </div>
   )
@@ -61,9 +173,11 @@ function AppInner() {
 
 function App() {
   return (
-    <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
-      <AppInner />
-    </APIProvider>
+    <UnitSystemProvider>
+      <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+        <AppInner />
+      </APIProvider>
+    </UnitSystemProvider>
   )
 }
 

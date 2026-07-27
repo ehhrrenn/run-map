@@ -42,6 +42,23 @@ export function destinationPoint(origin: LatLng, bearingDeg: number, distanceMet
   return { lat: toDeg(lat2), lng: toDeg(lng2) }
 }
 
+export function bearingDegBetween(a: LatLng, b: LatLng): number {
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const dLng = toRad(b.lng - a.lng)
+
+  const y = Math.sin(dLng) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+
+  return (toDeg(Math.atan2(y, x)) + 360) % 360
+}
+
+/** Smallest angle between two bearings, in [0, 180] degrees. */
+export function angularDiffDeg(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360
+  return diff > 180 ? 360 - diff : diff
+}
+
 /** Shortest distance in meters from a point to a segment, using a flat-earth
  * approximation local to the segment (fine at street scale). */
 export function distanceToSegmentMeters(point: LatLng, a: LatLng, b: LatLng): number {
