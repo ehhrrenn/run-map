@@ -44,3 +44,20 @@ main {
   color: #c0392b;
   font-size: 14px;
 }
+
+.route-summary {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 12px;
+  margin-top: 20px;
+  font-size: 14px;
+}
+
+.route-summary dt {
+  color: #6b6375;
+}
+
+.route-summary dd {
+  margin: 0;
+  font-weight: 600;
+}
