@@ -15,7 +15,7 @@ interface RouteControlsProps {
   disabled?: boolean
 }
 
-const DEFAULT_DISTANCE_METERS = 5000
+const DEFAULT_DISTANCE_METERS = distanceToMeters(3.1, 'imperial')
 const DEFAULT_MAX_ELEVATION_GAIN_METERS = 50
 
 export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
@@ -42,8 +42,11 @@ export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
           type="number"
           min={0.1}
           step={0.1}
-          value={metersToDistance(distanceMeters, unitSystem).toFixed(2)}
-          onChange={(e) => setDistanceMeters(distanceToMeters(Number(e.target.value), unitSystem))}
+          value={metersToDistance(distanceMeters, unitSystem).toFixed(1)}
+          onChange={(e) => {
+            const rounded = Math.round(Number(e.target.value) * 10) / 10
+            setDistanceMeters(distanceToMeters(rounded, unitSystem))
+          }}
         />
       </label>
 

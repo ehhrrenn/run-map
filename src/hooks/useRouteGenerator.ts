@@ -14,6 +14,8 @@ const BATCH_ROTATION_STEP_DEG = 17
 const MAX_BATCHES = 40
 const CANDIDATES_PER_PAGE = 3
 const TRAFFIC_FETCH_PADDING_METERS = 300
+// Prefer routes that don't overshoot the requested distance by more than this.
+const DISTANCE_OVERSHOOT_TOLERANCE = 1.05
 const TRAFFIC_DATA_WARNING =
   'Crossing data unavailable right now — showing routes without crossing avoidance.'
 
@@ -72,7 +74,11 @@ function scoreCandidates(candidates: GeneratedRoute[], request: RouteRequest): G
   const withinElevationLimit = candidates.filter(
     (c) => c.elevationGainMeters <= request.maxElevationGainMeters,
   )
-  const pool = withinElevationLimit.length > 0 ? withinElevationLimit : candidates
+  const elevationPool = withinElevationLimit.length > 0 ? withinElevationLimit : candidates
+
+  const maxAcceptableDistance = request.distanceMeters * DISTANCE_OVERSHOOT_TOLERANCE
+  const withinDistanceTolerance = elevationPool.filter((c) => c.distanceMeters <= maxAcceptableDistance)
+  const pool = withinDistanceTolerance.length > 0 ? withinDistanceTolerance : elevationPool
 
   return [...pool].sort((a, b) => {
     if (request.avoidTrafficSignals) {
