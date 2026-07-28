@@ -32,6 +32,11 @@ jobs:
           projectId: ${{ secrets.FIREBASE_PROJECT_ID }}
           channelId: live
       - name: Deploy Firestore rules
+        # Requires the FIREBASE_SERVICE_ACCOUNT to hold the Firebase Admin IAM
+        # role (Hosting-only service accounts get a 403 checking the Firestore
+        # API) - see README. continue-on-error so a not-yet-granted role
+        # doesn't block the Hosting deploy above, which already succeeded.
+        continue-on-error: true
         run: |
           echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
           npx firebase-tools deploy --only firestore:rules --project "$FIREBASE_PROJECT_ID"

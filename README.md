@@ -54,15 +54,24 @@ firebase deploy --only hosting
 ## CI/CD
 
 - `.github/workflows/ci.yml` runs lint + build on every PR and push to `main`.
-- `.github/workflows/deploy.yml` deploys `dist/` to Firebase Hosting and
-  `firestore.rules` to Firestore on push to `main`. Requires these repo
-  secrets:
-  - `FIREBASE_SERVICE_ACCOUNT` (JSON key for a service account with Hosting
-    Admin **and** Cloud Datastore/Firestore rules deploy permission,
-    generated via `firebase init hosting:github` or the Firebase Console)
+- `.github/workflows/deploy.yml` deploys `dist/` to Firebase Hosting, then
+  attempts to deploy `firestore.rules` to Firestore, on push to `main`.
+  Requires these repo secrets:
+  - `FIREBASE_SERVICE_ACCOUNT` (JSON key for a service account, generated via
+    `firebase init hosting:github` or the Firebase Console)
   - `FIREBASE_PROJECT_ID`
   - `VITE_GOOGLE_MAPS_API_KEY`, optionally `VITE_GOOGLE_MAPS_MAP_ID`, and the
     `VITE_FIREBASE_*` config values from `.env.example`
+  - **The Firestore rules deploy step needs one extra manual grant**: a
+    service account created just for `hosting:github` only has Hosting
+    permissions, so it gets `403 Permission denied ... firestore.googleapis.com`
+    trying to deploy rules. In Google Cloud Console > IAM & Admin > IAM, find
+    that service account and add the **Firebase Rules Admin** role (or the
+    broader **Firebase Admin** role, which covers Hosting + Firestore +
+    everything else). The step is `continue-on-error: true` so this doesn't
+    block the Hosting deploy while the role hasn't been granted yet — until
+    then, update `firestore.rules` manually with `firebase deploy --only
+    firestore:rules` from your machine.
 
 ## Project structure
 
