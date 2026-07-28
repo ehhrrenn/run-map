@@ -124,6 +124,8 @@ export function SavedRoutesScreen() {
               <dd>{route.trafficSignalCount}</dd>
               <dt>Crossings</dt>
               <dd>{route.crossingCount}</dd>
+              <dt>Turns</dt>
+              <dd>{route.turnCount}</dd>
             </dl>
             <div className="candidate-card__actions">
               <a href={googleMapsWalkingUrl(route.start, route.waypoints)} target="_blank" rel="noreferrer">

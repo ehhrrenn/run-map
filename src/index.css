@@ -1,5 +1,11 @@
 :root {
-  color-scheme: light dark;
+  /* The app's colors (light card backgrounds, dark-on-light text) are only
+     designed for a light canvas - "light dark" here would let browsers with
+     a forced dark theme substitute their own default text/background colors
+     for anything we don't set explicitly, producing mismatches like
+     white-on-white text. Opt out and stay light until an actual dark theme
+     is designed. */
+  color-scheme: light;
   font: 16px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -9,6 +15,8 @@
 
 body {
   margin: 0;
+  background: #ffffff;
+  color: #1c1a1f;
 }
 
 #root {

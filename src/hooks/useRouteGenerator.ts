@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useMapsLibrary } from '@vis.gl/react-google-maps'
-import type { GeneratedRoute, LatLng, RouteRequest } from '../types/route'
+import type { GeneratedRoute, LatLng, RoutePriority, RouteRequest } from '../types/route'
 import { angularDiffDeg, bearingDegBetween, destinationPoint, haversineDistanceMeters } from '../lib/geo'
 import { countNodesNearPath, fetchNearbyTrafficNodes, type OverpassNode } from '../lib/crossings'
 import { fetchNearbyPedestrianTrails, snapToNearestTrail, type PedestrianTrail } from '../lib/trails'
@@ -25,6 +25,10 @@ const ELEVATION_LIMIT_WARNING =
 // fraction of the loop radius are considered the same underlying route
 // (e.g. both snapped onto the same nearby trail), not distinct options.
 const MIN_DIVERGENCE_RADIUS_FRACTION = 0.25
+// A direction change along the path smaller than this is just the road
+// curving, not a turn a runner would notice or a navigation instruction
+// would call out.
+const TURN_ANGLE_THRESHOLD_DEG = 25
 
 interface TrafficNodes {
   signalNodes: OverpassNode[]
@@ -96,6 +100,33 @@ function elevationGainMeters(elevations: number[]): number {
   return gain
 }
 
+/** Counts direction changes along the routed path as a proxy for turns /
+ * navigation instructions, without depending on Routes API step/maneuver
+ * fields the rest of this app doesn't otherwise request. */
+function estimatedTurnCount(path: LatLng[]): number {
+  if (path.length < 3) return 0
+  let turns = 0
+  for (let i = 1; i < path.length - 1; i++) {
+    const bearingIn = bearingDegBetween(path[i - 1], path[i])
+    const bearingOut = bearingDegBetween(path[i], path[i + 1])
+    if (angularDiffDeg(bearingIn, bearingOut) >= TURN_ANGLE_THRESHOLD_DEG) {
+      turns += 1
+    }
+  }
+  return turns
+}
+
+function priorityMetric(candidate: GeneratedRoute, priority: RoutePriority): number {
+  switch (priority) {
+    case 'traffic':
+      return candidate.trafficSignalCount + candidate.crossingCount
+    case 'elevation':
+      return candidate.elevationGainMeters
+    case 'turns':
+      return candidate.turnCount
+  }
+}
+
 function scoreCandidates(candidates: GeneratedRoute[], request: RouteRequest): GeneratedRoute[] {
   const withinElevationLimit = candidates.filter(
     (c) => c.elevationGainMeters <= request.maxElevationGainMeters,
@@ -107,11 +138,9 @@ function scoreCandidates(candidates: GeneratedRoute[], request: RouteRequest): G
   const pool = withinDistanceTolerance.length > 0 ? withinDistanceTolerance : elevationPool
 
   return [...pool].sort((a, b) => {
-    if (request.avoidTrafficSignals) {
-      const crossingsA = a.trafficSignalCount + a.crossingCount
-      const crossingsB = b.trafficSignalCount + b.crossingCount
-      if (crossingsA !== crossingsB) return crossingsA - crossingsB
-    }
+    const priorityDiff =
+      priorityMetric(a, request.routePriority) - priorityMetric(b, request.routePriority)
+    if (priorityDiff !== 0) return priorityDiff
     return (
       Math.abs(a.distanceMeters - request.distanceMeters) -
       Math.abs(b.distanceMeters - request.distanceMeters)
@@ -234,6 +263,7 @@ export function useRouteGenerator() {
         elevationGainMeters: gain,
         trafficSignalCount: countNodesNearPath(trafficNodes.signalNodes, path),
         crossingCount: countNodesNearPath(trafficNodes.crossingNodes, path),
+        turnCount: estimatedTurnCount(path),
       }
     } catch (err) {
       lastErrorRef.current = err instanceof Error ? err.message : String(err)
@@ -281,11 +311,12 @@ export function useRouteGenerator() {
       )
       const fetchRadius = Math.max(radiusMeters, maxRequiredStopDistance) + TRAFFIC_FETCH_PADDING_METERS
 
-      // Only worth the extra query when the user actually wants to avoid
-      // crossings - otherwise there's nothing to bias the loop shape toward.
+      // Only worth the extra query when the user is actually prioritizing
+      // crossing avoidance - otherwise there's nothing to bias the loop
+      // shape toward.
       const [trafficNodesResult, trailsResult] = await Promise.allSettled([
         fetchNearbyTrafficNodes(request.start, fetchRadius),
-        request.avoidTrafficSignals
+        request.routePriority === 'traffic'
           ? fetchNearbyPedestrianTrails(request.start, fetchRadius)
           : Promise.resolve<PedestrianTrail[]>([]),
       ])

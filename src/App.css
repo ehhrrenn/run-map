@@ -106,7 +106,7 @@ main {
 .unit-toggle {
   display: flex;
   border: 1px solid #e5e4e7;
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -139,16 +139,14 @@ main {
   font-size: 14px;
 }
 
-.route-controls label.checkbox {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-}
-
-.route-controls input[type='checkbox'] {
-  accent-color: var(--accent);
-  width: 20px;
-  height: 20px;
+.route-controls select {
+  min-height: 44px;
+  padding: 10px 16px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: 1px solid #e5e4e7;
+  background: #ffffff;
+  color: #1c1a1f;
 }
 
 .error {
@@ -219,18 +217,32 @@ main {
 .candidate-card__stats dd {
   margin: 0;
   font-weight: 600;
+  color: #1c1a1f;
 }
 
 .candidate-card__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-  font-size: 13px;
 }
 
 .candidate-card__actions a {
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  text-decoration: none;
   font-weight: 600;
+  font-size: 16px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  min-height: 44px;
+}
+
+.candidate-card__actions a:hover {
+  background: var(--accent-hover);
 }
 
 .load-more-button {

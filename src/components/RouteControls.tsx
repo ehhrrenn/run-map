@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { RouteRequest } from '../types/route'
+import type { RoutePriority, RouteRequest } from '../types/route'
 import { useUnitSystem } from '../hooks/useUnitSystem'
 import {
   distanceToMeters,
@@ -24,14 +24,14 @@ export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
   const [maxElevationGainMeters, setMaxElevationGainMeters] = useState(
     DEFAULT_MAX_ELEVATION_GAIN_METERS,
   )
-  const [avoidTrafficSignals, setAvoidTrafficSignals] = useState(true)
+  const [routePriority, setRoutePriority] = useState<RoutePriority>('traffic')
 
   return (
     <form
       className="route-controls"
       onSubmit={(e) => {
         e.preventDefault()
-        onSubmit({ distanceMeters, maxElevationGainMeters, avoidTrafficSignals })
+        onSubmit({ distanceMeters, maxElevationGainMeters, routePriority })
       }}
     >
       <label htmlFor="distance">
@@ -65,15 +65,18 @@ export function RouteControls({ onSubmit, disabled }: RouteControlsProps) {
         />
       </label>
 
-      <label className="checkbox" htmlFor="avoid-traffic-signals">
-        <input
-          id="avoid-traffic-signals"
-          name="avoidTrafficSignals"
-          type="checkbox"
-          checked={avoidTrafficSignals}
-          onChange={(e) => setAvoidTrafficSignals(e.target.checked)}
-        />
-        Minimize stop lights / crossings
+      <label htmlFor="route-priority">
+        Prioritize
+        <select
+          id="route-priority"
+          name="routePriority"
+          value={routePriority}
+          onChange={(e) => setRoutePriority(e.target.value as RoutePriority)}
+        >
+          <option value="traffic">Least stop lights / crossings</option>
+          <option value="elevation">Least elevation gain</option>
+          <option value="turns">Least turns / instructions</option>
+        </select>
       </label>
 
       <button type="submit" disabled={disabled}>

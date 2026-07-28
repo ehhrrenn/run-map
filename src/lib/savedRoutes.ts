@@ -33,6 +33,7 @@ export async function saveRoute(
     elevationGainMeters: route.elevationGainMeters,
     trafficSignalCount: route.trafficSignalCount,
     crossingCount: route.crossingCount,
+    turnCount: route.turnCount,
     createdAt: serverTimestamp(),
   })
 }
@@ -59,6 +60,7 @@ export function subscribeSavedRoutes(
           elevationGainMeters: data.elevationGainMeters,
           trafficSignalCount: data.trafficSignalCount,
           crossingCount: data.crossingCount,
+          turnCount: data.turnCount,
           // Pending writes haven't been assigned a server timestamp yet -
           // treat them as "now" until the confirmed value arrives.
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : Date.now(),

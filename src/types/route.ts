@@ -3,11 +3,13 @@ export interface LatLng {
   lng: number
 }
 
+export type RoutePriority = 'traffic' | 'elevation' | 'turns'
+
 export interface RouteRequest {
   start: LatLng
   distanceMeters: number
   maxElevationGainMeters: number
-  avoidTrafficSignals: boolean
+  routePriority: RoutePriority
   requiredStops: LatLng[]
 }
 
@@ -18,6 +20,7 @@ export interface GeneratedRoute {
   elevationGainMeters: number
   trafficSignalCount: number
   crossingCount: number
+  turnCount: number
 }
 
 export interface SavedRoute extends GeneratedRoute {

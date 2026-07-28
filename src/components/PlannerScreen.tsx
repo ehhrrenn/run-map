@@ -170,6 +170,8 @@ export function PlannerScreen() {
                     <dd>{candidate.trafficSignalCount}</dd>
                     <dt>Crossings</dt>
                     <dd>{candidate.crossingCount}</dd>
+                    <dt>Turns</dt>
+                    <dd>{candidate.turnCount}</dd>
                   </dl>
                   {index === selectedIndex && start && (
                     <div className="candidate-card__actions">
