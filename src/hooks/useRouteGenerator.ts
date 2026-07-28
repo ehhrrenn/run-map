@@ -19,6 +19,8 @@ const TRAFFIC_FETCH_PADDING_METERS = 300
 const DISTANCE_OVERSHOOT_TOLERANCE = 1.05
 const TRAFFIC_DATA_WARNING =
   'Crossing data unavailable right now — showing routes without crossing avoidance.'
+const ELEVATION_LIMIT_WARNING =
+  'No routes found within your max elevation gain near this location — showing the closest matches instead.'
 
 interface TrafficNodes {
   signalNodes: OverpassNode[]
@@ -116,7 +118,8 @@ function scoreCandidates(candidates: GeneratedRoute[], request: RouteRequest): G
 interface CandidateCache {
   signature: string
   nextBatchIndex: number
-  pendingQueue: GeneratedRoute[]
+  rawPool: GeneratedRoute[]
+  served: Set<GeneratedRoute>
   trafficNodes: TrafficNodes
   trails: PedestrianTrail[]
 }
@@ -126,7 +129,15 @@ function emptyCache(
   trafficNodes: TrafficNodes,
   trails: PedestrianTrail[],
 ): CandidateCache {
-  return { signature, nextBatchIndex: 0, pendingQueue: [], trafficNodes, trails }
+  return { signature, nextBatchIndex: 0, rawPool: [], served: new Set(), trafficNodes, trails }
+}
+
+function meetsHardConstraints(candidate: GeneratedRoute, request: RouteRequest): boolean {
+  const maxAcceptableDistance = request.distanceMeters * DISTANCE_OVERSHOOT_TOLERANCE
+  return (
+    candidate.elevationGainMeters <= request.maxElevationGainMeters &&
+    candidate.distanceMeters <= maxAcceptableDistance
+  )
 }
 
 export function useRouteGenerator() {
@@ -135,6 +146,7 @@ export function useRouteGenerator() {
   const cacheRef = useRef<CandidateCache>(emptyCache('', EMPTY_TRAFFIC_NODES, []))
   const lastErrorRef = useRef<string | null>(null)
   const [trafficDataWarning, setTrafficDataWarning] = useState<string | null>(null)
+  const [elevationLimitWarning, setElevationLimitWarning] = useState<string | null>(null)
 
   const elevationService = useMemo(
     () => (elevationLibrary ? new elevationLibrary.ElevationService() : null),
@@ -208,7 +220,7 @@ export function useRouteGenerator() {
     const radiusMeters = (request.distanceMeters / (2 * Math.PI)) * LOOP_RADIUS_CALIBRATION
     const rotations = rotationsForBatch(batchIndex)
 
-    const raw = (
+    return (
       await Promise.all(
         rotations.map((rotation) =>
           buildCandidate(
@@ -222,8 +234,6 @@ export function useRouteGenerator() {
         ),
       )
     ).filter((c): c is GeneratedRoute => c !== null)
-
-    return scoreCandidates(raw, request)
   }
 
   async function loadNextCandidates(request: RouteRequest): Promise<GeneratedRoute[]> {
@@ -261,11 +271,19 @@ export function useRouteGenerator() {
     }
     const cache = cacheRef.current
 
-    while (cache.pendingQueue.length < CANDIDATES_PER_PAGE && cache.nextBatchIndex < MAX_BATCHES) {
+    function unservedMeetingConstraints(): GeneratedRoute[] {
+      return cache.rawPool.filter((c) => !cache.served.has(c) && meetsHardConstraints(c, request))
+    }
+
+    // Keep fetching more batches (different loop rotations) specifically
+    // hunting for candidates that satisfy the elevation/distance limits,
+    // rather than settling for whatever the first batch happened to produce -
+    // otherwise a hilly first attempt silently defeats the elevation cap.
+    while (unservedMeetingConstraints().length < CANDIDATES_PER_PAGE && cache.nextBatchIndex < MAX_BATCHES) {
       const isFirstBatch = cache.nextBatchIndex === 0
       const batch = await computeBatch(request, cache.nextBatchIndex, cache.trafficNodes, cache.trails)
       cache.nextBatchIndex += 1
-      cache.pendingQueue.push(...batch)
+      cache.rawPool.push(...batch)
 
       if (isFirstBatch && batch.length === 0) {
         // Every candidate failing on the very first attempt means something
@@ -280,7 +298,13 @@ export function useRouteGenerator() {
       }
     }
 
-    const page = cache.pendingQueue.splice(0, CANDIDATES_PER_PAGE)
+    const unserved = cache.rawPool.filter((c) => !cache.served.has(c))
+    setElevationLimitWarning(
+      unserved.some((c) => meetsHardConstraints(c, request)) ? null : ELEVATION_LIMIT_WARNING,
+    )
+
+    const page = scoreCandidates(unserved, request).slice(0, CANDIDATES_PER_PAGE)
+    page.forEach((c) => cache.served.add(c))
     if (page.length === 0) {
       throw new Error('Could not find more distinct routes near this location.')
     }
@@ -291,5 +315,6 @@ export function useRouteGenerator() {
     loadNextCandidates,
     ready: Boolean(routesLibrary && elevationService),
     trafficDataWarning,
+    elevationLimitWarning,
   }
 }

@@ -22,7 +22,7 @@ const MAX_REQUIRED_STOPS = 5
 function AppInner() {
   const { unitSystem } = useUnitSystem()
   const initialCenter = useInitialMapCenter()
-  const { loadNextCandidates, ready, trafficDataWarning } = useRouteGenerator()
+  const { loadNextCandidates, ready, trafficDataWarning, elevationLimitWarning } = useRouteGenerator()
 
   const [start, setStart] = useState<LatLng | null>(null)
   const [requiredStops, setRequiredStops] = useState<LatLng[]>([])
@@ -114,6 +114,7 @@ function AppInner() {
         {loading && <p>Generating route...</p>}
         {error && <p className="error">{error}</p>}
         {trafficDataWarning && <p className="warning">{trafficDataWarning}</p>}
+        {elevationLimitWarning && <p className="warning">{elevationLimitWarning}</p>}
 
         {candidates.length > 0 && (
           <>
