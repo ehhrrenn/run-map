@@ -19,3 +19,11 @@ export interface GeneratedRoute {
   trafficSignalCount: number
   crossingCount: number
 }
+
+export interface SavedRoute extends GeneratedRoute {
+  id: string
+  name: string
+  start: LatLng
+  requiredStops: LatLng[]
+  createdAt: number
+}
