@@ -7,7 +7,7 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
 }
 
 export function TopNav() {
-  const { user, loading, signIn, signOut } = useAuth()
+  const { user, loading, authError, signIn, signOut } = useAuth()
 
   return (
     <header className="top-nav">
@@ -22,6 +22,7 @@ export function TopNav() {
       </nav>
       <div className="top-nav__actions">
         <UnitToggle />
+        {authError && <p className="error top-nav__error">{authError}</p>}
         {!loading &&
           (user ? (
             <div className="top-nav__account">

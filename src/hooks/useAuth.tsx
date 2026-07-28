@@ -10,6 +10,7 @@ import { auth, googleProvider } from '../lib/auth'
 interface AuthContextValue {
   user: User | null
   loading: boolean
+  authError: string | null
   signIn: () => Promise<void>
   signOut: () => Promise<void>
 }
@@ -19,6 +20,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [authError, setAuthError] = useState<string | null>(null)
 
   useEffect(() => {
     return onAuthStateChanged(auth, (nextUser) => {
@@ -28,14 +30,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   async function signIn() {
-    await signInWithPopup(auth, googleProvider)
+    setAuthError(null)
+    try {
+      await signInWithPopup(auth, googleProvider)
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Could not sign in.')
+    }
   }
 
   async function signOut() {
     await firebaseSignOut(auth)
   }
 
-  const value = useMemo(() => ({ user, loading, signIn, signOut }), [user, loading])
+  const value = useMemo(
+    () => ({ user, loading, authError, signIn, signOut }),
+    [user, loading, authError],
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -156,6 +156,11 @@ main {
   font-size: 14px;
 }
 
+.top-nav__error {
+  margin: 0;
+  max-width: 260px;
+}
+
 .warning {
   color: #9a6700;
   font-size: 14px;
