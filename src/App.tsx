@@ -17,13 +17,15 @@ import {
 import { appleMapsWalkingUrl, googleMapsWalkingUrl } from './lib/deeplinks'
 import './App.css'
 
+const MAX_REQUIRED_STOPS = 5
+
 function AppInner() {
   const { unitSystem } = useUnitSystem()
   const initialCenter = useInitialMapCenter()
   const { loadNextCandidates, ready, trafficDataWarning } = useRouteGenerator()
 
   const [start, setStart] = useState<LatLng | null>(null)
-  const [requiredStop, setRequiredStop] = useState<LatLng | null>(null)
+  const [requiredStops, setRequiredStops] = useState<LatLng[]>([])
   const [addingStop, setAddingStop] = useState(false)
   const [candidates, setCandidates] = useState<GeneratedRoute[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -34,19 +36,23 @@ function AppInner() {
 
   function handleMapClick(point: LatLng) {
     if (addingStop) {
-      setRequiredStop(point)
+      setRequiredStops((prev) => [...prev, point])
       setAddingStop(false)
     } else {
       setStart(point)
     }
   }
 
-  async function handleGenerate(request: Omit<RouteRequest, 'start'>) {
+  function handleRemoveStop(index: number) {
+    setRequiredStops((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  async function handleGenerate(request: Omit<RouteRequest, 'start' | 'requiredStops'>) {
     if (!start) {
       setError('Click the map to choose a starting point first.')
       return
     }
-    const fullRequest: RouteRequest = { ...request, start, requiredStop: requiredStop ?? undefined }
+    const fullRequest: RouteRequest = { ...request, start, requiredStops }
     lastRequestRef.current = fullRequest
     setError(null)
     setLoading(true)
@@ -85,20 +91,23 @@ function AppInner() {
         </div>
         <p>Click the map to set a starting point, then set your preferences.</p>
 
-        {requiredStop ? (
-          <button
-            type="button"
-            onClick={() => {
-              setRequiredStop(null)
-              setAddingStop(false)
-            }}
-          >
-            Remove required stop
-          </button>
-        ) : (
+        {requiredStops.length < MAX_REQUIRED_STOPS && (
           <button type="button" onClick={() => setAddingStop((v) => !v)}>
             {addingStop ? 'Click the map to place it (cancel)' : 'Add a required stop'}
           </button>
+        )}
+
+        {requiredStops.length > 0 && (
+          <ul className="required-stop-list">
+            {requiredStops.map((_, index) => (
+              <li key={index}>
+                <span>Stop {index + 1}</span>
+                <button type="button" onClick={() => handleRemoveStop(index)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
 
         <RouteControls onSubmit={handleGenerate} disabled={!start || !ready || loading} />
@@ -159,7 +168,7 @@ function AppInner() {
         {initialCenter ? (
           <MapView
             start={start}
-            requiredStop={requiredStop}
+            requiredStops={requiredStops}
             path={selected?.path ?? []}
             initialCenter={initialCenter}
             onMapClick={handleMapClick}

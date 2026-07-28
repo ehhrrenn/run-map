@@ -11,7 +11,7 @@ import {
 } from '../lib/units'
 
 interface RouteControlsProps {
-  onSubmit: (request: Omit<RouteRequest, 'start'>) => void
+  onSubmit: (request: Omit<RouteRequest, 'start' | 'requiredStops'>) => void
   disabled?: boolean
 }
 

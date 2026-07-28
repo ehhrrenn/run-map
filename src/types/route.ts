@@ -8,7 +8,7 @@ export interface RouteRequest {
   distanceMeters: number
   maxElevationGainMeters: number
   avoidTrafficSignals: boolean
-  requiredStop?: LatLng
+  requiredStops: LatLng[]
 }
 
 export interface GeneratedRoute {

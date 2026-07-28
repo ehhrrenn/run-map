@@ -27,41 +27,53 @@ interface TrafficNodes {
 
 const EMPTY_TRAFFIC_NODES: TrafficNodes = { signalNodes: [], crossingNodes: [] }
 
+const MIN_LOOP_WAYPOINTS = 3
+
 function loopWaypoints(
   start: LatLng,
   radiusMeters: number,
   rotationDeg: number,
+  count: number = MIN_LOOP_WAYPOINTS,
   trails: PedestrianTrail[] = [],
 ): LatLng[] {
-  const points = [0, 120, 240].map((offset) => destinationPoint(start, rotationDeg + offset, radiusMeters))
+  const angleStep = 360 / count
+  const points = Array.from({ length: count }, (_, i) =>
+    destinationPoint(start, rotationDeg + i * angleStep, radiusMeters),
+  )
   return trails.length === 0 ? points : points.map((p) => snapToNearestTrail(p, trails))
 }
 
-function nearestWaypointIndex(basePoints: LatLng[], start: LatLng, target: LatLng): number {
-  const targetBearing = bearingDegBetween(start, target)
-  let bestIndex = 0
-  let bestDiff = Infinity
-  basePoints.forEach((point, index) => {
-    const diff = angularDiffDeg(bearingDegBetween(start, point), targetBearing)
-    if (diff < bestDiff) {
-      bestDiff = diff
-      bestIndex = index
-    }
-  })
-  return bestIndex
-}
-
-function loopWaypointsWithRequiredStop(
+/** Substitutes each required stop into whichever of the base loop points is
+ * angularly closest to it (from `start`) that isn't already taken, so N
+ * required stops always produce a loop with exactly max(3, N) waypoints. */
+function loopWaypointsWithRequiredStops(
   start: LatLng,
   radiusMeters: number,
   rotationDeg: number,
-  requiredStop: LatLng,
+  requiredStops: LatLng[],
   trails: PedestrianTrail[] = [],
 ): LatLng[] {
-  const base = loopWaypoints(start, radiusMeters, rotationDeg, trails)
-  const index = nearestWaypointIndex(base, start, requiredStop)
+  const count = Math.max(MIN_LOOP_WAYPOINTS, requiredStops.length)
+  const base = loopWaypoints(start, radiusMeters, rotationDeg, count, trails)
   const result = [...base]
-  result[index] = requiredStop
+  const used = new Set<number>()
+
+  for (const stop of requiredStops) {
+    const targetBearing = bearingDegBetween(start, stop)
+    let bestIndex = -1
+    let bestDiff = Infinity
+    base.forEach((point, index) => {
+      if (used.has(index)) return
+      const diff = angularDiffDeg(bearingDegBetween(start, point), targetBearing)
+      if (diff < bestDiff) {
+        bestDiff = diff
+        bestIndex = index
+      }
+    })
+    result[bestIndex] = stop
+    used.add(bestIndex)
+  }
+
   return result
 }
 
@@ -155,14 +167,15 @@ export function useRouteGenerator() {
     rotationDeg: number,
     trafficNodes: TrafficNodes,
     trails: PedestrianTrail[],
-    requiredStop?: LatLng,
+    requiredStops: LatLng[],
   ): Promise<GeneratedRoute | null> {
     if (!elevationService) throw new Error('Elevation service not ready')
 
     try {
-      const waypoints = requiredStop
-        ? loopWaypointsWithRequiredStop(start, radiusMeters, rotationDeg, requiredStop, trails)
-        : loopWaypoints(start, radiusMeters, rotationDeg, trails)
+      const waypoints =
+        requiredStops.length > 0
+          ? loopWaypointsWithRequiredStops(start, radiusMeters, rotationDeg, requiredStops, trails)
+          : loopWaypoints(start, radiusMeters, rotationDeg, MIN_LOOP_WAYPOINTS, trails)
       const { path, distanceMeters } = await routeForWaypoints(start, waypoints)
 
       const elevationResult = await elevationService.getElevationAlongPath({
@@ -204,7 +217,7 @@ export function useRouteGenerator() {
             rotation,
             trafficNodes,
             trails,
-            request.requiredStop,
+            request.requiredStops,
           ),
         ),
       )
@@ -221,10 +234,11 @@ export function useRouteGenerator() {
     const signature = JSON.stringify(request)
     if (cacheRef.current.signature !== signature) {
       const radiusMeters = (request.distanceMeters / (2 * Math.PI)) * LOOP_RADIUS_CALIBRATION
-      const requiredStopDistance = request.requiredStop
-        ? haversineDistanceMeters(request.start, request.requiredStop)
-        : 0
-      const fetchRadius = Math.max(radiusMeters, requiredStopDistance) + TRAFFIC_FETCH_PADDING_METERS
+      const maxRequiredStopDistance = request.requiredStops.reduce(
+        (max, stop) => Math.max(max, haversineDistanceMeters(request.start, stop)),
+        0,
+      )
+      const fetchRadius = Math.max(radiusMeters, maxRequiredStopDistance) + TRAFFIC_FETCH_PADDING_METERS
 
       // Only worth the extra query when the user actually wants to avoid
       // crossings - otherwise there's nothing to bias the loop shape toward.

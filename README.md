@@ -29,6 +29,11 @@ Firebase Hosting.
 
 ## Firebase Hosting
 
+Deploys to the `run-map` Hosting site (https://run-map.web.app/) within the
+`run-map-4b0d7` project — a non-default site, set via `"site": "run-map"` in
+`firebase.json`. No `.firebaserc` target mapping is needed for this; the CLI
+resolves the site by name directly against whichever project is active.
+
 ```
 npm install -g firebase-tools
 firebase login
