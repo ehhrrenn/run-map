@@ -85,6 +85,34 @@
   border-right: 1px solid #e5e4e7;
 }
 
+.sidebar--collapsed {
+  padding: 0;
+}
+
+.resize-handle {
+  flex: none;
+  width: 14px;
+  background: #f0eff2;
+  border-left: 1px solid #e5e4e7;
+  border-right: 1px solid #e5e4e7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle:hover {
+  background: #e5e4e7;
+}
+
+.resize-handle__toggle {
+  min-height: auto;
+  padding: 4px 6px;
+  font-size: 14px;
+  line-height: 1;
+}
+
 main {
   flex: 1;
 }
@@ -345,6 +373,16 @@ button:disabled {
     width: 100%;
     max-height: 50vh;
     border-right: none;
+    border-bottom: 1px solid #e5e4e7;
+  }
+
+  .resize-handle {
+    width: 100%;
+    height: 14px;
+    cursor: row-resize;
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid #e5e4e7;
     border-bottom: 1px solid #e5e4e7;
   }
 

@@ -18,6 +18,49 @@ import { appleMapsWalkingUrl, googleMapsWalkingUrl } from '../lib/deeplinks'
 
 const MAX_REQUIRED_STOPS = 5
 
+const MOBILE_LAYOUT_QUERY = '(max-width: 768px)'
+const STORAGE_KEY_WIDTH = 'run-map:sidebar-width'
+const STORAGE_KEY_HEIGHT_VH = 'run-map:sidebar-height-vh'
+const STORAGE_KEY_COLLAPSED = 'run-map:sidebar-collapsed'
+const DEFAULT_WIDTH_PX = 320
+const MIN_WIDTH_PX = 240
+const MAX_WIDTH_PX = 640
+const DEFAULT_HEIGHT_VH = 50
+const MIN_HEIGHT_VH = 15
+const MAX_HEIGHT_VH = 80
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function readStoredNumber(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key)
+    const parsed = raw === null ? NaN : Number(raw)
+    return Number.isFinite(parsed) ? parsed : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function readStoredBoolean(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? fallback : raw === 'true'
+  } catch {
+    return fallback
+  }
+}
+
+function writeStored(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // localStorage unavailable (private browsing, quota, etc.) - the sizing
+    // preference just won't persist across sessions.
+  }
+}
+
 export function PlannerScreen() {
   const location = useLocation()
   const { unitSystem } = useUnitSystem()
@@ -37,6 +80,68 @@ export function PlannerScreen() {
   const [routeName, setRouteName] = useState('')
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const lastRequestRef = useRef<RouteRequest | null>(null)
+
+  const [isMobileLayout, setIsMobileLayout] = useState(
+    () => window.matchMedia(MOBILE_LAYOUT_QUERY).matches,
+  )
+  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredNumber(STORAGE_KEY_WIDTH, DEFAULT_WIDTH_PX))
+  const [sidebarHeightVh, setSidebarHeightVh] = useState(() =>
+    readStoredNumber(STORAGE_KEY_HEIGHT_VH, DEFAULT_HEIGHT_VH),
+  )
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    readStoredBoolean(STORAGE_KEY_COLLAPSED, false),
+  )
+
+  useEffect(() => {
+    const mql = window.matchMedia(MOBILE_LAYOUT_QUERY)
+    const listener = (e: MediaQueryListEvent) => setIsMobileLayout(e.matches)
+    mql.addEventListener('change', listener)
+    return () => mql.removeEventListener('change', listener)
+  }, [])
+
+  function setSidebarCollapsedPersisted(next: boolean) {
+    setSidebarCollapsed(next)
+    writeStored(STORAGE_KEY_COLLAPSED, String(next))
+  }
+
+  function handleResizeStart(startPos: number) {
+    if (sidebarCollapsed) setSidebarCollapsedPersisted(false)
+    const startSize = isMobileLayout ? sidebarHeightVh : sidebarWidth
+
+    function applyDelta(pos: number) {
+      const delta = pos - startPos
+      if (isMobileLayout) {
+        const deltaVh = (delta / window.innerHeight) * 100
+        const next = clamp(startSize + deltaVh, MIN_HEIGHT_VH, MAX_HEIGHT_VH)
+        setSidebarHeightVh(next)
+        writeStored(STORAGE_KEY_HEIGHT_VH, String(next))
+      } else {
+        const next = clamp(startSize + delta, MIN_WIDTH_PX, MAX_WIDTH_PX)
+        setSidebarWidth(next)
+        writeStored(STORAGE_KEY_WIDTH, String(next))
+      }
+    }
+
+    function onMouseMove(e: MouseEvent) {
+      applyDelta(isMobileLayout ? e.clientY : e.clientX)
+    }
+    function onTouchMove(e: TouchEvent) {
+      if (e.touches.length === 0) return
+      applyDelta(isMobileLayout ? e.touches[0].clientY : e.touches[0].clientX)
+      e.preventDefault()
+    }
+    function onEnd() {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onEnd)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onEnd)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onEnd)
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onEnd)
+  }
 
   useEffect(() => {
     const state = location.state as { savedRoute?: SavedRoute } | null
@@ -118,7 +223,14 @@ export function PlannerScreen() {
 
   return (
     <div className="app-layout">
-      <aside className="sidebar">
+      <aside
+        className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`}
+        style={
+          isMobileLayout
+            ? { maxHeight: sidebarCollapsed ? 0 : `${sidebarHeightVh}vh` }
+            : { width: sidebarCollapsed ? 0 : sidebarWidth }
+        }
+      >
         <p>Click the map to set a starting point, then set your preferences.</p>
 
         {requiredStops.length < MAX_REQUIRED_STOPS && (
@@ -231,6 +343,34 @@ export function PlannerScreen() {
           </>
         )}
       </aside>
+      <div
+        className="resize-handle"
+        role="separator"
+        aria-orientation={isMobileLayout ? 'horizontal' : 'vertical'}
+        aria-label="Resize planner panel"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          handleResizeStart(isMobileLayout ? e.clientY : e.clientX)
+        }}
+        onTouchStart={(e) => {
+          if (e.touches.length === 0) return
+          handleResizeStart(isMobileLayout ? e.touches[0].clientY : e.touches[0].clientX)
+        }}
+      >
+        <button
+          type="button"
+          className="resize-handle__toggle"
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            setSidebarCollapsedPersisted(!sidebarCollapsed)
+          }}
+          aria-label={sidebarCollapsed ? 'Expand planner panel' : 'Collapse planner panel'}
+        >
+          {isMobileLayout ? (sidebarCollapsed ? '⌄' : '⌃') : sidebarCollapsed ? '›' : '‹'}
+        </button>
+      </div>
       <main>
         {initialCenter ? (
           <MapView
