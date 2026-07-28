@@ -100,15 +100,37 @@ function elevationGainMeters(elevations: number[]): number {
   return gain
 }
 
+/** Google's routed path is a dense polyline with a vertex at every bend in
+ * the underlying road/sidewalk/crosswalk geometry, not just at real turns -
+ * comparing bearing between every adjacent pair treats a single intersection
+ * jog (crossing one leg, then immediately crossing back) as three or four
+ * separate "turns". Collapse points closer than this first, so only
+ * genuinely distinct street segments get compared. */
+const TURN_MIN_SEGMENT_METERS = 20
+
+function simplifyPathForTurnDetection(path: LatLng[]): LatLng[] {
+  if (path.length === 0) return path
+  const simplified = [path[0]]
+  for (let i = 1; i < path.length; i++) {
+    if (haversineDistanceMeters(simplified[simplified.length - 1], path[i]) >= TURN_MIN_SEGMENT_METERS) {
+      simplified.push(path[i])
+    }
+  }
+  const last = path[path.length - 1]
+  if (simplified[simplified.length - 1] !== last) simplified.push(last)
+  return simplified
+}
+
 /** Counts direction changes along the routed path as a proxy for turns /
  * navigation instructions, without depending on Routes API step/maneuver
  * fields the rest of this app doesn't otherwise request. */
 function estimatedTurnCount(path: LatLng[]): number {
-  if (path.length < 3) return 0
+  const simplified = simplifyPathForTurnDetection(path)
+  if (simplified.length < 3) return 0
   let turns = 0
-  for (let i = 1; i < path.length - 1; i++) {
-    const bearingIn = bearingDegBetween(path[i - 1], path[i])
-    const bearingOut = bearingDegBetween(path[i], path[i + 1])
+  for (let i = 1; i < simplified.length - 1; i++) {
+    const bearingIn = bearingDegBetween(simplified[i - 1], simplified[i])
+    const bearingOut = bearingDegBetween(simplified[i], simplified[i + 1])
     if (angularDiffDeg(bearingIn, bearingOut) >= TURN_ANGLE_THRESHOLD_DEG) {
       turns += 1
     }

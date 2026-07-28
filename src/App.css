@@ -133,7 +133,7 @@ main {
 
 .unit-toggle {
   display: flex;
-  border: 1px solid #e5e4e7;
+  background: #f0eff2;
   border-radius: 8px;
   overflow: hidden;
 }
@@ -287,7 +287,8 @@ main {
 }
 
 .candidate-card__save-form input {
-  flex: 1;
+  flex: none;
+  width: 140px;
 }
 
 .saved-routes-screen {
@@ -317,8 +318,9 @@ main {
   font-size: 14px;
 }
 
-.saved-routes-filters input[type='number'] {
-  width: 100px;
+.saved-routes-filters input[type='range'] {
+  width: 200px;
+  accent-color: var(--accent);
 }
 
 .saved-route-name {
@@ -333,7 +335,8 @@ main {
 /* Touch-friendly sizing for all interactive controls. font-size: 16px on
    inputs also stops iOS Safari from auto-zooming on focus. */
 button,
-input[type='number'] {
+input[type='number'],
+input[type='text'] {
   min-height: 44px;
   padding: 10px 16px;
   font-size: 16px;
@@ -407,7 +410,7 @@ button:disabled {
     align-items: stretch;
   }
 
-  .saved-routes-filters input[type='number'] {
+  .saved-routes-filters input[type='range'] {
     width: 100%;
   }
 }

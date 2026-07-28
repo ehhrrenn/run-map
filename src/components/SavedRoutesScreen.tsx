@@ -11,15 +11,14 @@ import {
   elevationUnitLabel,
   metersToDistance,
   metersToElevation,
-  type UnitSystem,
 } from '../lib/units'
 import { appleMapsWalkingUrl, googleMapsWalkingUrl } from '../lib/deeplinks'
 
-function parseOptionalDistance(value: string, unitSystem: UnitSystem): number | null {
-  if (value.trim() === '') return null
-  const parsed = Number(value)
-  return Number.isNaN(parsed) ? null : distanceToMeters(parsed, unitSystem)
-}
+// A fixed real-world bound (not re-interpreted per unit system) so toggling
+// units only changes the displayed numbers, not what's actually filtered -
+// slider at either end means "no bound" on that side.
+const MAX_DISTANCE_FILTER_METERS = 32000
+const DISTANCE_FILTER_STEP = 0.5
 
 export function SavedRoutesScreen() {
   const { user } = useAuth()
@@ -28,8 +27,8 @@ export function SavedRoutesScreen() {
 
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([])
   const [nameFilter, setNameFilter] = useState('')
-  const [minDistance, setMinDistance] = useState('')
-  const [maxDistance, setMaxDistance] = useState('')
+  const [minDistanceMeters, setMinDistanceMeters] = useState(0)
+  const [maxDistanceMeters, setMaxDistanceMeters] = useState(MAX_DISTANCE_FILTER_METERS)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -51,9 +50,19 @@ export function SavedRoutesScreen() {
 
   const filtered = filterSavedRoutes(savedRoutes, {
     nameQuery: nameFilter,
-    minDistanceMeters: parseOptionalDistance(minDistance, unitSystem),
-    maxDistanceMeters: parseOptionalDistance(maxDistance, unitSystem),
+    minDistanceMeters: minDistanceMeters <= 0 ? null : minDistanceMeters,
+    maxDistanceMeters: maxDistanceMeters >= MAX_DISTANCE_FILTER_METERS ? null : maxDistanceMeters,
   })
+
+  function handleMinSliderChange(displayValue: number) {
+    const meters = Math.min(distanceToMeters(displayValue, unitSystem), maxDistanceMeters)
+    setMinDistanceMeters(meters)
+  }
+
+  function handleMaxSliderChange(displayValue: number) {
+    const meters = Math.max(distanceToMeters(displayValue, unitSystem), minDistanceMeters)
+    setMaxDistanceMeters(meters)
+  }
 
   async function handleDelete(routeId: string) {
     if (!user) return
@@ -78,23 +87,29 @@ export function SavedRoutesScreen() {
           aria-label="Search saved routes by name"
         />
         <label>
-          Min distance ({distanceUnitLabel(unitSystem)})
+          Min distance: {metersToDistance(minDistanceMeters, unitSystem).toFixed(1)}{' '}
+          {distanceUnitLabel(unitSystem)}
           <input
-            type="number"
-            min="0"
-            step="0.1"
-            value={minDistance}
-            onChange={(e) => setMinDistance(e.target.value)}
+            type="range"
+            min={0}
+            max={metersToDistance(MAX_DISTANCE_FILTER_METERS, unitSystem)}
+            step={DISTANCE_FILTER_STEP}
+            value={metersToDistance(minDistanceMeters, unitSystem)}
+            onChange={(e) => handleMinSliderChange(Number(e.target.value))}
           />
         </label>
         <label>
-          Max distance ({distanceUnitLabel(unitSystem)})
+          Max distance:{' '}
+          {maxDistanceMeters >= MAX_DISTANCE_FILTER_METERS
+            ? 'no limit'
+            : `${metersToDistance(maxDistanceMeters, unitSystem).toFixed(1)} ${distanceUnitLabel(unitSystem)}`}
           <input
-            type="number"
-            min="0"
-            step="0.1"
-            value={maxDistance}
-            onChange={(e) => setMaxDistance(e.target.value)}
+            type="range"
+            min={0}
+            max={metersToDistance(MAX_DISTANCE_FILTER_METERS, unitSystem)}
+            step={DISTANCE_FILTER_STEP}
+            value={metersToDistance(maxDistanceMeters, unitSystem)}
+            onChange={(e) => handleMaxSliderChange(Number(e.target.value))}
           />
         </label>
       </div>

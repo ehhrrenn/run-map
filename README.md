@@ -62,16 +62,30 @@ firebase deploy --only hosting
   - `FIREBASE_PROJECT_ID`
   - `VITE_GOOGLE_MAPS_API_KEY`, optionally `VITE_GOOGLE_MAPS_MAP_ID`, and the
     `VITE_FIREBASE_*` config values from `.env.example`
-  - **The Firestore rules deploy step needs one extra manual grant**: a
-    service account created just for `hosting:github` only has Hosting
-    permissions, so it gets `403 Permission denied ... firestore.googleapis.com`
-    trying to deploy rules. In Google Cloud Console > IAM & Admin > IAM, find
-    that service account and add the **Firebase Rules Admin** role (or the
-    broader **Firebase Admin** role, which covers Hosting + Firestore +
-    everything else). The step is `continue-on-error: true` so this doesn't
-    block the Hosting deploy while the role hasn't been granted yet — until
-    then, update `firestore.rules` manually with `firebase deploy --only
-    firestore:rules` from your machine.
+  - **The Firestore rules deploy step needs one extra manual grant, and as
+    of writing it has failed on every deploy so far** (the GitHub Actions UI
+    shows the job as green because the step is `continue-on-error: true` —
+    that only hides the failure from the overall run status, it doesn't fix
+    it; check the step's own log to see the real `403 Permission denied ...
+    firestore.googleapis.com`). This means `firestore.rules` has never
+    actually reached production, which is why saving a route fails with
+    "Missing or insufficient permissions" even though the workflow looks
+    fine. To fix: in Google Cloud Console > IAM & Admin > IAM, find the
+    `FIREBASE_SERVICE_ACCOUNT` service account and add the **Firebase
+    Admin** role specifically — the narrower **Firebase Rules Admin** role
+    is *not* enough, because the failing call
+    (`serviceusage.googleapis.com` checking whether the Firestore API is
+    enabled) needs a permission Rules Admin doesn't include.
+  - **Fastest way to unblock saving routes right now**: skip CI entirely and
+    deploy the rules from your own machine, authenticated as yourself rather
+    than the CI service account:
+    ```
+    firebase login
+    firebase deploy --only firestore:rules --project <your-project-id>
+    ```
+    Your personal account almost certainly already has sufficient project
+    permissions, so this works regardless of the CI service account's IAM
+    grants.
 
 ## Project structure
 
