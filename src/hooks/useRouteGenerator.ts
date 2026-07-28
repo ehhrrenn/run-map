@@ -21,6 +21,10 @@ const TRAFFIC_DATA_WARNING =
   'Crossing data unavailable right now — showing routes without crossing avoidance.'
 const ELEVATION_LIMIT_WARNING =
   'No routes found within your max elevation gain near this location — showing the closest matches instead.'
+// Two candidates whose loop waypoints average closer together than this
+// fraction of the loop radius are considered the same underlying route
+// (e.g. both snapped onto the same nearby trail), not distinct options.
+const MIN_DIVERGENCE_RADIUS_FRACTION = 0.25
 
 interface TrafficNodes {
   signalNodes: OverpassNode[]
@@ -138,6 +142,33 @@ function meetsHardConstraints(candidate: GeneratedRoute, request: RouteRequest):
     candidate.elevationGainMeters <= request.maxElevationGainMeters &&
     candidate.distanceMeters <= maxAcceptableDistance
   )
+}
+
+function averageWaypointDivergenceMeters(a: LatLng[], b: LatLng[]): number {
+  if (a.length === 0 || a.length !== b.length) return Infinity
+  const total = a.reduce((sum, point, i) => sum + haversineDistanceMeters(point, b[i]), 0)
+  return total / a.length
+}
+
+/** Greedily picks up to `count` candidates (already sorted best-first) that
+ * are each meaningfully different in shape from `avoid` and from each other,
+ * so "3 route options" doesn't mean 3 near-identical variants of the one
+ * route the road network (or trail-snapping) keeps converging on. */
+function pickDistinctCandidates(
+  sortedCandidates: GeneratedRoute[],
+  avoid: GeneratedRoute[],
+  count: number,
+  minDivergenceMeters: number,
+): GeneratedRoute[] {
+  const chosen: GeneratedRoute[] = []
+  for (const candidate of sortedCandidates) {
+    const tooSimilar = [...avoid, ...chosen].some(
+      (existing) => averageWaypointDivergenceMeters(candidate.waypoints, existing.waypoints) < minDivergenceMeters,
+    )
+    if (!tooSimilar) chosen.push(candidate)
+    if (chosen.length >= count) break
+  }
+  return chosen
 }
 
 export function useRouteGenerator() {
@@ -270,16 +301,21 @@ export function useRouteGenerator() {
       cacheRef.current = emptyCache(signature, trafficNodes, trails)
     }
     const cache = cacheRef.current
+    const radiusMeters = (request.distanceMeters / (2 * Math.PI)) * LOOP_RADIUS_CALIBRATION
+    const minDivergenceMeters = radiusMeters * MIN_DIVERGENCE_RADIUS_FRACTION
+    const servedList = Array.from(cache.served)
 
-    function unservedMeetingConstraints(): GeneratedRoute[] {
-      return cache.rawPool.filter((c) => !cache.served.has(c) && meetsHardConstraints(c, request))
+    function candidatePage(): GeneratedRoute[] {
+      const unserved = cache.rawPool.filter((c) => !cache.served.has(c) && meetsHardConstraints(c, request))
+      return pickDistinctCandidates(scoreCandidates(unserved, request), servedList, CANDIDATES_PER_PAGE, minDivergenceMeters)
     }
 
     // Keep fetching more batches (different loop rotations) specifically
-    // hunting for candidates that satisfy the elevation/distance limits,
-    // rather than settling for whatever the first batch happened to produce -
-    // otherwise a hilly first attempt silently defeats the elevation cap.
-    while (unservedMeetingConstraints().length < CANDIDATES_PER_PAGE && cache.nextBatchIndex < MAX_BATCHES) {
+    // hunting for candidates that satisfy the elevation/distance limits AND
+    // are meaningfully different from each other - otherwise a hilly first
+    // attempt silently defeats the elevation cap, or trail-snapping collapses
+    // every rotation onto the same nearby path and "3 routes" are really one.
+    while (candidatePage().length < CANDIDATES_PER_PAGE && cache.nextBatchIndex < MAX_BATCHES) {
       const isFirstBatch = cache.nextBatchIndex === 0
       const batch = await computeBatch(request, cache.nextBatchIndex, cache.trafficNodes, cache.trails)
       cache.nextBatchIndex += 1
@@ -303,7 +339,24 @@ export function useRouteGenerator() {
       unserved.some((c) => meetsHardConstraints(c, request)) ? null : ELEVATION_LIMIT_WARNING,
     )
 
-    const page = scoreCandidates(unserved, request).slice(0, CANDIDATES_PER_PAGE)
+    let page = candidatePage()
+    if (page.length < CANDIDATES_PER_PAGE && unserved.length > 0) {
+      // Search exhausted without enough distinct, compliant candidates -
+      // fill remaining slots from the full unserved pool, still preferring
+      // distinct shapes over duplicates where any are available.
+      const fallbackSorted = scoreCandidates(unserved, request)
+      const additional = pickDistinctCandidates(
+        fallbackSorted,
+        [...servedList, ...page],
+        CANDIDATES_PER_PAGE - page.length,
+        minDivergenceMeters,
+      )
+      page = [...page, ...additional]
+      if (page.length < CANDIDATES_PER_PAGE) {
+        const remaining = fallbackSorted.filter((c) => !page.includes(c))
+        page = [...page, ...remaining.slice(0, CANDIDATES_PER_PAGE - page.length)]
+      }
+    }
     page.forEach((c) => cache.served.add(c))
     if (page.length === 0) {
       throw new Error('Could not find more distinct routes near this location.')
